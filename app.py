@@ -130,7 +130,7 @@ def parse_ing_csv(raw: bytes) -> pd.DataFrame:
         raise ValueError("Datei konnte nicht gelesen werden.")
 
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    start = next((i for i, l in enumerate(lines) if "Buchungsdatum" in l), None)
+    start = next((i for i, l in enumerate(lines) if "Buchung" in l and ";" in l), None)
     if start is None:
         raise ValueError(
             "Kein ING-Format erkannt.\n"
@@ -142,13 +142,17 @@ def parse_ing_csv(raw: bytes) -> pd.DataFrame:
 
     col_map = {
         "Buchungsdatum": "buchungsdatum",
+        "Buchung": "buchungsdatum",
         "Auftraggeber/Empfänger": "empfaenger",
         "Verwendungszweck": "verwendungszweck",
         "Betrag": "betrag",
         "Währung": "waehrung",
     }
     df = df.rename(columns=col_map)
-    df = df[[c for c in col_map.values() if c in df.columns]]
+    # deduplicate if both Buchung and Buchungsdatum existed
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated()]
+    df = df[[c for c in ["buchungsdatum", "empfaenger", "verwendungszweck", "betrag", "waehrung"] if c in df.columns]]
     df = df[df["buchungsdatum"].str.match(r"\d{2}\.\d{2}\.\d{4}", na=False)]
 
     df["buchungsdatum"] = pd.to_datetime(df["buchungsdatum"], format="%d.%m.%Y")
