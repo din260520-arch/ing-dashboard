@@ -137,28 +137,34 @@ def parse_ing_csv(raw: bytes) -> pd.DataFrame:
             "Exportiere unter: Girokonto → Umsätze → Herunterladen → CSV auswählen."
         )
 
-    df = pd.read_csv(io.StringIO("\n".join(lines[start:])), sep=";", decimal=",", dtype=str)
-    df.columns = df.columns.str.strip()
+    # Manuelles Parsing: ING-Felder können Semikolons enthalten
+    # Struktur: Datum;Datum;Empfänger;Buchungstext;Verwendungszweck;Saldo;Währung;Betrag;Währung
+    # Die letzten 4 Felder sind immer Saldo;Währung;Betrag;Währung
+    records = []
+    for line in lines[start + 1:]:
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(";")
+        if len(parts) < 9:
+            continue
+        if not re.match(r"\d{2}\.\d{2}\.\d{4}", parts[0]):
+            continue
+        records.append({
+            "buchungsdatum": parts[0],
+            "empfaenger":    parts[2],
+            "verwendungszweck": ";".join(parts[4:-4]) if len(parts) > 9 else parts[4],
+            "betrag":        parts[-2].replace(".", "").replace(",", "."),
+            "waehrung":      parts[-1],
+        })
 
-    col_map = {
-        "Buchungsdatum": "buchungsdatum",
-        "Buchung": "buchungsdatum",
-        "Auftraggeber/Empfänger": "empfaenger",
-        "Verwendungszweck": "verwendungszweck",
-        "Betrag": "betrag",
-        "Währung": "waehrung",
-    }
-    df = df.rename(columns=col_map)
-    # deduplicate if both Buchung and Buchungsdatum existed
-    if df.columns.duplicated().any():
-        df = df.loc[:, ~df.columns.duplicated()]
-    df = df[[c for c in ["buchungsdatum", "empfaenger", "verwendungszweck", "betrag", "waehrung"] if c in df.columns]]
-    df = df[df["buchungsdatum"].str.match(r"\d{2}\.\d{2}\.\d{4}", na=False)]
+    if not records:
+        raise ValueError("Keine Buchungen gefunden. Bitte ING Girokonto CSV verwenden.")
+
+    df = pd.DataFrame(records)
 
     df["buchungsdatum"] = pd.to_datetime(df["buchungsdatum"], format="%d.%m.%Y")
-    df["betrag"] = (
-        df["betrag"].str.replace(".", "", regex=False).str.replace(",", ".", regex=False).astype(float)
-    )
+    df["betrag"] = df["betrag"].astype(float)
     for col in ("empfaenger", "verwendungszweck"):
         if col not in df.columns:
             df[col] = ""
